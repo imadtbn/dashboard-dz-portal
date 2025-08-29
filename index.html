@@ -217,9 +217,17 @@
             color: white;
         }
         
+        .btn-edit:hover {
+            background-color: #ec971f;
+        }
+        
         .btn-delete {
             background-color: #d9534f;
             color: white;
+        }
+        
+        .btn-delete:hover {
+            background-color: #c9302c;
         }
         
         .modal {
@@ -242,6 +250,8 @@
             width: 90%;
             max-width: 600px;
             box-shadow: var(--shadow);
+            max-height: 90vh;
+            overflow-y: auto;
         }
         
         .modal-header {
@@ -311,33 +321,137 @@
             display: none;
         }
         
+        .mobile-menu-btn {
+            display: none;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+        
+        /* تحسينات للشاشات الصغيرة */
+        @media (max-width: 992px) {
+            .dashboard {
+                grid-template-columns: 200px 1fr;
+            }
+            
+            .stats-cards {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
         @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+            
+            .header-actions {
+                width: 100%;
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+            
             .dashboard {
                 grid-template-columns: 1fr;
             }
             
             .sidebar {
                 display: none;
+                position: fixed;
+                top: 0;
+                right: 0;
+                height: 100%;
+                width: 70%;
+                max-width: 300px;
+                z-index: 99;
+                box-shadow: 2px 0 10px rgba(0,0,0,0.2);
+                overflow-y: auto;
+            }
+            
+            .sidebar.active {
+                display: block;
+            }
+            
+            .mobile-menu-btn {
+                display: block;
+                position: absolute;
+                left: 15px;
+                top: 15px;
             }
             
             .stats-cards {
                 grid-template-columns: 1fr;
             }
             
-            .header {
-                flex-direction: column;
-                gap: 15px;
-                text-align: center;
+            .services-table {
+                display: block;
+                overflow-x: auto;
             }
             
-            .header-actions {
-                justify-content: center;
+            .services-table th, 
+            .services-table td {
+                padding: 8px 10px;
+                font-size: 0.9rem;
             }
+            
+            .action-buttons {
+                flex-direction: column;
+                gap: 5px;
+            }
+            
+            .modal-content {
+                padding: 15px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 1.2rem;
+                margin-right: 40px;
+            }
+            
+            .btn {
+                padding: 6px 10px;
+                font-size: 0.9rem;
+            }
+            
+            .stat-number {
+                font-size: 1.5rem;
+            }
+            
+            .section-title {
+                font-size: 1.1rem;
+            }
+            
+            .form-actions {
+                flex-direction: column;
+            }
+        }
+        
+        .overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 98;
+        }
+        
+        .overlay.active {
+            display: block;
         }
     </style>
 </head>
 <body>
     <div class="header">
+        <button class="mobile-menu-btn" id="mobileMenuBtn">
+            <i class="fas fa-bars"></i>
+        </button>
         <h1>
             <i class="fas fa-cogs"></i>
             لوحة تحكم البوابة الجزائرية للخدمات الرقمية
@@ -346,45 +460,47 @@
             <button class="btn btn-primary" id="addServiceBtn">
                 <i class="fas fa-plus"></i> إضافة خدمة جديدة
             </button>
-            <button class="btn btn-secondary" onclick="window.location.href='index.html'">
+            <button class="btn btn-secondary" id="backToPortalBtn">
                 <i class="fas fa-home"></i> العودة للبوابة
             </button>
         </div>
     </div>
     
+    <div class="overlay" id="overlay"></div>
+    
+    <div class="sidebar" id="sidebar">
+        <h3 class="sidebar-title">القائمة</h3>
+        <ul class="nav-list">
+            <li class="nav-item">
+                <a href="#" class="nav-link active">
+                    <i class="fas fa-tachometer-alt"></i> لوحة التحكم
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <i class="fas fa-list"></i> إدارة الخدمات
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <i class="fas fa-chart-bar"></i> الإحصائيات
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <i class="fas fa-cog"></i> الإعدادات
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <i class="fas fa-users"></i> المستخدمون
+                </a>
+            </li>
+        </ul>
+    </div>
+    
     <div class="container">
         <div class="dashboard">
-            <div class="sidebar">
-                <h3 class="sidebar-title">القائمة</h3>
-                <ul class="nav-list">
-                    <li class="nav-item">
-                        <a href="#" class="nav-link active">
-                            <i class="fas fa-tachometer-alt"></i> لوحة التحكم
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link">
-                            <i class="fas fa-list"></i> إدارة الخدمات
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link">
-                            <i class="fas fa-chart-bar"></i> الإحصائيات
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link">
-                            <i class="fas fa-cog"></i> الإعدادات
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="#" class="nav-link">
-                            <i class="fas fa-users"></i> المستخدمون
-                        </a>
-                    </li>
-                </ul>
-            </div>
-            
             <div class="main-content">
                 <h2 class="section-title">
                     <i class="fas fa-tachometer-alt"></i> نظرة عامة
@@ -426,17 +542,17 @@
                             <th>الإجراءات</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="servicesTableBody">
                         <tr>
                             <td>دفع فواتير الكهرباء والغاز</td>
                             <td>خدمات الدفع الإلكتروني</td>
                             <td>2023-10-15</td>
                             <td>
                                 <div class="action-buttons">
-                                    <button class="btn btn-sm btn-edit">
+                                    <button class="btn btn-sm btn-edit" data-id="1">
                                         <i class="fas fa-edit"></i> تعديل
                                     </button>
-                                    <button class="btn btn-sm btn-delete">
+                                    <button class="btn btn-sm btn-delete" data-id="1">
                                         <i class="fas fa-trash"></i> حذف
                                     </button>
                                 </div>
@@ -448,10 +564,10 @@
                             <td>2023-10-14</td>
                             <td>
                                 <div class="action-buttons">
-                                    <button class="btn btn-sm btn-edit">
+                                    <button class="btn btn-sm btn-edit" data-id="2">
                                         <i class="fas fa-edit"></i> تعديل
                                     </button>
-                                    <button class="btn btn-sm btn-delete">
+                                    <button class="btn btn-sm btn-delete" data-id="2">
                                         <i class="fas fa-trash"></i> حذف
                                     </button>
                                 </div>
@@ -463,10 +579,10 @@
                             <td>2023-10-13</td>
                             <td>
                                 <div class="action-buttons">
-                                    <button class="btn btn-sm btn-edit">
+                                    <button class="btn btn-sm btn-edit" data-id="3">
                                         <i class="fas fa-edit"></i> تعديل
                                     </button>
-                                    <button class="btn btn-sm btn-delete">
+                                    <button class="btn btn-sm btn-delete" data-id="3">
                                         <i class="fas fa-trash"></i> حذف
                                     </button>
                                 </div>
@@ -478,10 +594,10 @@
                             <td>2023-10-12</td>
                             <td>
                                 <div class="action-buttons">
-                                    <button class="btn btn-sm btn-edit">
+                                    <button class="btn btn-sm btn-edit" data-id="4">
                                         <i class="fas fa-edit"></i> تعديل
                                     </button>
-                                    <button class="btn btn-sm btn-delete">
+                                    <button class="btn btn-sm btn-delete" data-id="4">
                                         <i class="fas fa-trash"></i> حذف
                                     </button>
                                 </div>
@@ -493,10 +609,10 @@
                             <td>2023-10-11</td>
                             <td>
                                 <div class="action-buttons">
-                                    <button class="btn btn-sm btn-edit">
+                                    <button class="btn btn-sm btn-edit" data-id="5">
                                         <i class="fas fa-edit"></i> تعديل
                                     </button>
-                                    <button class="btn btn-sm btn-delete">
+                                    <button class="btn btn-sm btn-delete" data-id="5">
                                         <i class="fas fa-trash"></i> حذف
                                     </button>
                                 </div>
@@ -519,6 +635,7 @@
             </div>
             
             <form id="serviceForm">
+                <input type="hidden" id="serviceId" value="">
                 <div class="form-group">
                     <label for="serviceName" class="form-label">اسم الخدمة</label>
                     <input type="text" id="serviceName" class="form-control" required placeholder="أدخل اسم الخدمة">
@@ -582,9 +699,31 @@
                 
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" id="cancelAddService">إلغاء</button>
-                    <button type="submit" class="btn btn-primary">حفظ الخدمة</button>
+                    <button type="submit" class="btn btn-primary" id="saveServiceBtn">حفظ الخدمة</button>
                 </div>
             </form>
+        </div>
+    </div>
+    
+    <!-- نافذة تأكيد الحذف -->
+    <div class="modal" id="confirmDeleteModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fas fa-exclamation-triangle"></i> تأكيد الحذف
+                </h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <p>هل أنت متأكد من أنك تريد حذف هذه الخدمة؟</p>
+                <p id="serviceToDeleteName" style="font-weight: bold; color: var(--secondary-color);"></p>
+            </div>
+            
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" id="cancelDelete">إلغاء</button>
+                <button type="button" class="btn btn-delete" id="confirmDelete">حذف</button>
+            </div>
         </div>
     </div>
     
@@ -593,48 +732,275 @@
     </div>
 
     <script>
+        // تخزين البيانات (في حالة حقيقية سيتم الاتصال بقاعدة البيانات)
+        let services = [
+            {
+                id: 1,
+                name: "دفع فواتير الكهرباء والغاز",
+                url: "https://epayement.elit.dz/payementFacture.xhtml",
+                category: "payment-links",
+                icon: "fas fa-file-invoice-dollar",
+                description: "دفع فواتير الكهرباء والغاز عبر الإنترنت",
+                date: "2023-10-15"
+            },
+            {
+                id: 2,
+                name: "استخراج شهادة الميلاد",
+                url: "https://etatcivil.interieur.gov.dz/",
+                category: "admin-links",
+                icon: "fas fa-id-card",
+                description: "استخراج شهادة الميلاد عبر الإنترنت",
+                date: "2023-10-14"
+            },
+            {
+                id: 3,
+                name: "تعبئة رصيد الهاتف - موبيليس",
+                url: "https://e-paiement.mobilis.dz/",
+                category: "recharge-links",
+                icon: "fas fa-mobile-alt",
+                description: "تعبئة رصيد الهاتف لمشتركي موبيليس",
+                date: "2023-10-13"
+            },
+            {
+                id: 4,
+                name: "الاطلاع على رصيد الحساب الجاري",
+                url: "https://eccp.poste.dz/login",
+                category: "post-links",
+                icon: "fas fa-wallet",
+                description: "الاطلاع على رصيد الحساب الجاري البريدي",
+                date: "2023-10-12"
+            },
+            {
+                id: 5,
+                name: "فضاء أولياء التلاميذ",
+                url: "https://awlyaa.education.dz/login",
+                category: "education-section",
+                icon: "fas fa-user-shield",
+                description: "فضاء أولياء التلاميذ لمتابعة الدراسة",
+                date: "2023-10-11"
+            }
+        ];
+        
         // عناصر DOM
+        const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('overlay');
         const addServiceBtn = document.getElementById('addServiceBtn');
+        const backToPortalBtn = document.getElementById('backToPortalBtn');
         const addServiceModal = document.getElementById('addServiceModal');
-        const closeModalBtn = document.querySelector('.close-modal');
+        const confirmDeleteModal = document.getElementById('confirmDeleteModal');
+        const closeModalBtns = document.querySelectorAll('.close-modal');
         const cancelAddServiceBtn = document.getElementById('cancelAddService');
         const serviceForm = document.getElementById('serviceForm');
         const notification = document.getElementById('notification');
+        const servicesTableBody = document.getElementById('servicesTableBody');
+        const cancelDeleteBtn = document.getElementById('cancelDelete');
+        const confirmDeleteBtn = document.getElementById('confirmDelete');
+        const serviceToDeleteName = document.getElementById('serviceToDeleteName');
+        
+        let currentServiceId = null;
+        let isEditMode = false;
+        
+        // فتح/إغلاق القائمة الجانبية على الهاتف
+        mobileMenuBtn.addEventListener('click', () => {
+            sidebar.classList.toggle('active');
+            overlay.classList.toggle('active');
+        });
+        
+        // إغلاق القائمة الجانبية عند النقر على overlay
+        overlay.addEventListener('click', () => {
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
         
         // فتح نافذة إضافة خدمة
         addServiceBtn.addEventListener('click', () => {
+            isEditMode = false;
+            document.getElementById('serviceId').value = '';
+            serviceForm.reset();
+            document.getElementById('modalTitle').textContent = 'إضافة خدمة جديدة';
+            document.getElementById('saveServiceBtn').textContent = 'حفظ الخدمة';
             addServiceModal.style.display = 'flex';
         });
         
-        // إغلاق نافذة إضافة خدمة
-        closeModalBtn.addEventListener('click', closeModal);
-        cancelAddServiceBtn.addEventListener('click', closeModal);
+        // العودة إلى البوابة الرئيسية
+        backToPortalBtn.addEventListener('click', () => {
+            window.location.href = 'index.html';
+        });
         
-        // إغلاق النافذة عند النقر خارجها
+        // إغلاق النوافذ المنبثقة
+        closeModalBtns.forEach(btn => {
+            btn.addEventListener('click', closeModals);
+        });
+        
+        cancelAddServiceBtn.addEventListener('click', closeModals);
+        cancelDeleteBtn.addEventListener('click', closeModals);
+        
+        // إغلاق النوافذ المنبثقة عند النقر خارجها
         window.addEventListener('click', (e) => {
             if (e.target === addServiceModal) {
-                closeModal();
+                closeModals();
+            }
+            if (e.target === confirmDeleteModal) {
+                closeModals();
             }
         });
         
-        function closeModal() {
+        function closeModals() {
             addServiceModal.style.display = 'none';
-            serviceForm.reset();
+            confirmDeleteModal.style.display = 'none';
+            overlay.classList.remove('active');
         }
         
-        // معالجة إرسال النموذج
+        // معالجة إرسال النموذج (إضافة/تعديل خدمة)
         serviceForm.addEventListener('submit', (e) => {
             e.preventDefault();
             
-            // هنا سيتم إضافة الكود لحفظ الخدمة في قاعدة البيانات أو localStorage
-            // في هذا المثال، سنكتفي بعرض إشعار نجاح
+            const serviceData = {
+                name: document.getElementById('serviceName').value,
+                url: document.getElementById('serviceUrl').value,
+                category: document.getElementById('serviceCategory').value,
+                icon: document.getElementById('serviceIcon').value,
+                description: document.getElementById('serviceDescription').value,
+                date: new Date().toISOString().split('T')[0] // تاريخ اليوم
+            };
             
-            // إغلاق النافذة
-            closeModal();
+            if (isEditMode) {
+                // وضع التعديل
+                serviceData.id = currentServiceId;
+                updateService(serviceData);
+                showNotification('تم تعديل الخدمة بنجاح!');
+            } else {
+                // وضع الإضافة
+                serviceData.id = Date.now();
+                addService(serviceData);
+                showNotification('تم إضافة الخدمة بنجاح!');
+            }
             
-            // عرض إشعار النجاح
-            showNotification('تم إضافة الخدمة بنجاح!');
+            // إغلاق النافذة وتحديث الجدول
+            closeModals();
+            renderServicesTable();
         });
+        
+        // تفعيل أزرار التعديل في الجدول
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('btn-edit') || e.target.parentElement.classList.contains('btn-edit')) {
+                const btn = e.target.classList.contains('btn-edit') ? e.target : e.target.parentElement;
+                const serviceId = parseInt(btn.getAttribute('data-id'));
+                editService(serviceId);
+            }
+            
+            if (e.target.classList.contains('btn-delete') || e.target.parentElement.classList.contains('btn-delete')) {
+                const btn = e.target.classList.contains('btn-delete') ? e.target : e.target.parentElement;
+                const serviceId = parseInt(btn.getAttribute('data-id'));
+                confirmDelete(serviceId);
+            }
+        });
+        
+        // تأكيد الحذف
+        function confirmDelete(serviceId) {
+            const service = services.find(s => s.id === serviceId);
+            if (service) {
+                currentServiceId = serviceId;
+                serviceToDeleteName.textContent = service.name;
+                confirmDeleteModal.style.display = 'flex';
+            }
+        }
+        
+        // تنفيذ الحذف
+        confirmDeleteBtn.addEventListener('click', () => {
+            deleteService(currentServiceId);
+            renderServicesTable();
+            showNotification('تم حذف الخدمة بنجاح!');
+            closeModals();
+        });
+        
+        // وظائف إدارة الخدمات
+        function addService(service) {
+            services.push(service);
+        }
+        
+        function updateService(updatedService) {
+            const index = services.findIndex(s => s.id === updatedService.id);
+            if (index !== -1) {
+                services[index] = updatedService;
+            }
+        }
+        
+        function deleteService(serviceId) {
+            services = services.filter(s => s.id !== serviceId);
+        }
+        
+        function editService(serviceId) {
+            const service = services.find(s => s.id === serviceId);
+            if (service) {
+                isEditMode = true;
+                currentServiceId = serviceId;
+                
+                // تعبئة النموذج ببيانات الخدمة
+                document.getElementById('serviceId').value = service.id;
+                document.getElementById('serviceName').value = service.name;
+                document.getElementById('serviceUrl').value = service.url;
+                document.getElementById('serviceCategory').value = service.category;
+                document.getElementById('serviceIcon').value = service.icon;
+                document.getElementById('serviceDescription').value = service.description || '';
+                
+                document.querySelector('.modal-title').textContent = 'تعديل الخدمة';
+                document.getElementById('saveServiceBtn').textContent = 'تحديث الخدمة';
+                
+                addServiceModal.style.display = 'flex';
+            }
+        }
+        
+        // عرض الخدمات في الجدول
+        function renderServicesTable() {
+            servicesTableBody.innerHTML = '';
+            
+            services.forEach(service => {
+                const row = document.createElement('tr');
+                
+                row.innerHTML = `
+                    <td>${service.name}</td>
+                    <td>${getCategoryName(service.category)}</td>
+                    <td>${service.date}</td>
+                    <td>
+                        <div class="action-buttons">
+                            <button class="btn btn-sm btn-edit" data-id="${service.id}">
+                                <i class="fas fa-edit"></i> تعديل
+                            </button>
+                            <button class="btn btn-sm btn-delete" data-id="${service.id}">
+                                <i class="fas fa-trash"></i> حذف
+                            </button>
+                        </div>
+                    </td>
+                `;
+                
+                servicesTableBody.appendChild(row);
+            });
+        }
+        
+        // الحصول على اسم القسم
+        function getCategoryName(categoryId) {
+            const categories = {
+                'payment-links': 'خدمات الدفع الإلكتروني',
+                'recharge-links': 'تعبئة الهاتف النقال',
+                'post-links': 'بريد الجزائر',
+                'admin-links': 'الإدارة المحلية',
+                'education-section': 'التربية والتعليم',
+                'auto-entrepreneur': 'الخدمات الجامعية',
+                'vocational-section': 'التكوين المهني',
+                'real-estate-section': 'خدمات عقارية',
+                'social-security': 'الضمان الاجتماعي',
+                'justice-links': 'الخدمات القضائية',
+                'transport-section': 'النقل وحجز التذاكر',
+                'anem-links': 'الوكالة الوطنية للتشغيل',
+                'emergency-numbers': 'فضاءات ووكالات',
+                'insurance-links': 'خدمات التأمين',
+                'health-links': 'الخدمات الصحية'
+            };
+            
+            return categories[categoryId] || categoryId;
+        }
         
         // وظيفة عرض الإشعارات
         function showNotification(message) {
@@ -646,18 +1012,24 @@
             }, 3000);
         }
         
-        // إضافة تأثيرات للجدول
-        const tableRows = document.querySelectorAll('.services-table tr');
-        tableRows.forEach(row => {
-            row.addEventListener('click', (e) => {
-                if (!e.target.closest('.action-buttons')) {
-                    row.style.backgroundColor = '#f5f5f5';
-                    setTimeout(() => {
-                        row.style.backgroundColor = '';
-                    }, 300);
+        // تفعيل التنقل في القائمة الجانبية
+        const navLinks = document.querySelectorAll('.nav-link');
+        navLinks.forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                navLinks.forEach(l => l.classList.remove('active'));
+                link.classList.add('active');
+                
+                // على الهواتف، إغلاق القائمة بعد النقر على عنصر
+                if (window.innerWidth <= 768) {
+                    sidebar.classList.remove('active');
+                    overlay.classList.remove('active');
                 }
             });
         });
+        
+        // تهيئة أولية
+        renderServicesTable();
     </script>
 </body>
 </html>

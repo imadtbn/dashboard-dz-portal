@@ -1,399 +1,663 @@
-import React, { useEffect, useMemo, useState } from "react";
-
-/**
- * Admin Dashboard for dz_portal
- * Single-file React component. Drop it into /admin/index.html via a bundler-less preview in ChatGPT canvas,
- * or copy JSX into your setup (Vite/CRA). Uses only browser fetch. No external libs required.
- *
- * What it does
- * - Load services JSON from GitHub (Contents API) or from a pasted JSON.
- * - Add/Edit/Delete services with validation.
- * - Reorder by drag buttons.
- * - Filter + search.
- * - Export/Import JSON.
- * - Commit back to GitHub (client-side) using a Personal Access Token.
- * - Autosave draft to localStorage.
- *
- * Security note
- * - Putting a PAT in the browser is risky. Prefer a fine-scoped classic token (repo:public_repo) and revoke after use,
- *   or use a GitHub Action with a webhook. For quick edits on GitHub Pages this works.
- */
-
-// ---------- Types ----------
-/** @typedef {{
- *   id: string,
- *   title: string,
- *   url: string,
- *   category: string,
- *   icon: string,   // e.g. "fas fa-landmark"
- *   color: string,  // e.g. "#006400"
- *   description?: string,
- *   tags?: string[],
- *   active?: boolean,
- *   phone?: string,
- * }} Service */
-
-// ---------- Helpers ----------
-const uid = () => Math.random().toString(36).slice(2, 10);
-const b64 = (s) => typeof btoa !== "undefined" ? btoa(unescape(encodeURIComponent(s))) : Buffer.from(s, "utf-8").toString("base64");
-const fromB64 = (s) => typeof atob !== "undefined" ? decodeURIComponent(escape(atob(s))) : Buffer.from(s, "base64").toString("utf-8");
-
-const ls = {
-  get(k, d) { try { return JSON.parse(localStorage.getItem(k) || "null") ?? d; } catch { return d; } },
-  set(k, v) { localStorage.setItem(k, JSON.stringify(v)); },
-  del(k) { localStorage.removeItem(k); }
-};
-
-const defaultSettings = {
-  owner: "imadtbn",
-  repo: "dz_portal",
-  branch: "main",
-  path: "data/services.json",   // change if your JSON lives elsewhere
-};
-
-const emptyService = /** @type {Service} */ ({
-  id: "",
-  title: "",
-  url: "",
-  category: "",
-  icon: "fas fa-link",
-  color: "#1f2937",
-  description: "",
-  tags: [],
-  active: true,
-  phone: "",
-});
-
-// ---------- Main Component ----------
-export default function AdminDashboard() {
-  const [services, setServices] = useState(/** @type {Service[]} */([]));
-  const [draft, setDraft] = useState/** @type {[Service, Function]} */([emptyService, () => {}]);
-  const [editId, setEditId] = useState(/** @type {string | null} */(null));
-  const [query, setQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [settings, setSettings] = useState(ls.get("dzp_settings", defaultSettings));
-  const [githubToken, setGithubToken] = useState(ls.get("dzp_token", ""));
-  const [loading, setLoading] = useState(false);
-  const [fileSha, setFileSha] = useState(/** @type {string | null} */(null));
-  const [toast, setToast] = useState("");
-
-  const categories = useMemo(() => {
-    const set = new Set(services.map(s => s.category).filter(Boolean));
-    return Array.from(set).sort();
-  }, [services]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return services
-      .filter(s => categoryFilter === "all" || s.category === categoryFilter)
-      .filter(s => !q || [s.title, s.url, s.category, s.description, (s.tags||[]).join(" ")]
-        .some(v => (v||"").toLowerCase().includes(q))
-      );
-  }, [services, query, categoryFilter]);
-
-  // Autosave draft + services
-  useEffect(() => { ls.set("dzp_services", services); }, [services]);
-  useEffect(() => { ls.set("dzp_draft", draft); }, [draft]);
-  useEffect(() => { ls.set("dzp_settings", settings); }, [settings]);
-  useEffect(() => { ls.set("dzp_token", githubToken); }, [githubToken]);
-
-  // Restore from localStorage on first run
-  useEffect(() => {
-    const saved = ls.get("dzp_services", null);
-    const savedDraft = ls.get("dzp_draft", null);
-    if (saved) setServices(saved);
-    if (savedDraft) setDraft(savedDraft);
-  }, []);
-
-  // ---------- GitHub API ----------
-  const ghHeaders = useMemo(() => ({
-    "Accept": "application/vnd.github+json",
-    "Authorization": githubToken ? `Bearer ${githubToken}` : undefined,
-  }), [githubToken]);
-
-  async function loadFromGitHub() {
-    setLoading(true); setToast("");
-    try {
-      const url = `https://api.github.com/repos/${settings.owner}/${settings.repo}/contents/${settings.path}?ref=${settings.branch}`;
-      const res = await fetch(url, { headers: ghHeaders });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      if (!json.content) throw new Error("File has no content");
-      const text = fromB64(json.content);
-      const data = JSON.parse(text);
-      if (!Array.isArray(data)) throw new Error("JSON must be an array of services");
-      setServices(sanitizeServices(data));
-      setFileSha(json.sha || null);
-      setToast("تم التحميل من GitHub");
-    } catch (e) {
-      console.error(e);
-      setToast("فشل التحميل من GitHub. تحقق من المسار والصلاحيات.");
-    } finally { setLoading(false); }
-  }
-
-  async function saveToGitHub(message = "Update services.json") {
-    setLoading(true); setToast("");
-    try {
-      const url = `https://api.github.com/repos/${settings.owner}/${settings.repo}/contents/${settings.path}`;
-      const body = {
-        message,
-        content: b64(JSON.stringify(services, null, 2)),
-        branch: settings.branch,
-        sha: fileSha || undefined,
-      };
-      const res = await fetch(url, { method: "PUT", headers: {
-        ...ghHeaders,
-        "Content-Type": "application/json",
-      }, body: JSON.stringify(body)});
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const out = await res.json();
-      setFileSha(out.content?.sha || null);
-      setToast("تم الحفظ في GitHub");
-    } catch (e) {
-      console.error(e);
-      setToast("فشل الحفظ في GitHub. تأكد من التوكن وحقوق الكتابة.");
-    } finally { setLoading(false); }
-  }
-
-  // ---------- CRUD ----------
-  function sanitizeServices(arr) {
-    return arr.map((s, i) => ({
-      id: s.id || uid(),
-      title: s.title?.trim() || `خدمة ${i+1}`,
-      url: s.url?.trim() || "",
-      category: s.category?.trim() || "عام",
-      icon: s.icon?.trim() || "fas fa-link",
-      color: s.color || "#1f2937",
-      description: s.description || "",
-      tags: Array.isArray(s.tags) ? s.tags : [],
-      active: s.active !== false,
-      phone: s.phone || "",
-    }));
-  }
-
-  function startAdd() {
-    setEditId(null);
-    setDraft({ ...emptyService, id: uid() });
-  }
-
-  function startEdit(id) {
-    const s = services.find(x => x.id === id);
-    if (!s) return;
-    setEditId(id);
-    setDraft({ ...s, tags: [...(s.tags||[])] });
-  }
-
-  function remove(id) {
-    if (!confirm("حذف الخدمة نهائيًا؟")) return;
-    setServices(prev => prev.filter(x => x.id !== id));
-    if (editId === id) { setEditId(null); setDraft(emptyService); }
-  }
-
-  function up(id) {
-    setServices(prev => {
-      const i = prev.findIndex(x => x.id === id);
-      if (i <= 0) return prev;
-      const arr = [...prev];
-      const t = arr[i-1]; arr[i-1] = arr[i]; arr[i] = t;
-      return arr;
-    });
-  }
-  function down(id) {
-    setServices(prev => {
-      const i = prev.findIndex(x => x.id === id);
-      if (i === -1 || i >= prev.length-1) return prev;
-      const arr = [...prev];
-      const t = arr[i+1]; arr[i+1] = arr[i]; arr[i] = t;
-      return arr;
-    });
-  }
-
-  function saveDraft() {
-    const clean = {
-      ...draft,
-      title: draft.title.trim(),
-      url: draft.url.trim(),
-      category: draft.category.trim() || "عام",
-      icon: draft.icon.trim() || "fas fa-link",
-      color: draft.color || "#1f2937",
-      tags: (draft.tags || []).map(t => t.trim()).filter(Boolean)
-    };
-    if (!clean.title || !clean.url) { alert("العنوان والرابط إجباريان"); return; }
-    if (!/^https?:\/\//i.test(clean.url) && !clean.url.startsWith("tel:")) {
-      alert("الرابط يجب أن يبدأ بـ http أو https أو tel:");
-      return;
-    }
-    setServices(prev => {
-      const i = prev.findIndex(x => x.id === clean.id);
-      if (i === -1) return [clean, ...prev];
-      const arr = [...prev]; arr[i] = clean; return arr;
-    });
-    setEditId(clean.id);
-    setToast("تم حفظ التعديل في المسودة");
-  }
-
-  function clearAll() {
-    if (!confirm("مسح كل الخدمات من المسودة؟")) return;
-    setServices([]);
-    setEditId(null);
-    setDraft(emptyService);
-  }
-
-  function exportJson() {
-    const blob = new Blob([JSON.stringify(services, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "services.json"; a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function importJson(file) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result);
-        if (!Array.isArray(data)) throw new Error();
-        setServices(sanitizeServices(data));
-        setToast("تم الاستيراد من ملف");
-      } catch { alert("ملف غير صالح"); }
-    };
-    reader.readAsText(file);
-  }
-
-  // ---------- UI ----------
-  return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 p-4 md:p-8">
-      <div className="max-w-7xl mx-auto space-y-6">
-        <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <h1 className="text-2xl md:text-3xl font-bold">لوحة التحكم — dz_portal</h1>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button className="px-3 py-2 rounded-2xl shadow bg-white hover:bg-gray-100" onClick={startAdd}>خدمة جديدة</button>
-            <button className="px-3 py-2 rounded-2xl shadow bg-white hover:bg-gray-100" onClick={saveDraft}>حفظ الخدمة</button>
-            <button className="px-3 py-2 rounded-2xl shadow bg-white hover:bg-gray-100" onClick={exportJson}>تصدير JSON</button>
-            <label className="px-3 py-2 rounded-2xl shadow bg-white hover:bg-gray-100 cursor-pointer">
-              استيراد JSON<input type="file" accept="application/json" className="hidden" onChange={e => e.target.files && importJson(e.target.files[0])} />
-            </label>
-            <button className="px-3 py-2 rounded-2xl shadow bg-white hover:bg-gray-100" onClick={clearAll}>مسح الكل</button>
-          </div>
-        </header>
-
-        <section className="grid md:grid-cols-3 gap-6">
-          {/* Editor */}
-          <div className="md:col-span-1">
-            <div className="bg-white rounded-2xl shadow p-4 space-y-3">
-              <h2 className="font-semibold">{editId ? "تعديل خدمة" : "إضافة خدمة"}</h2>
-              <Field label="العنوان"><input className="w-full border rounded-xl p-2" value={draft.title} onChange={e=>setDraft({...draft, title:e.target.value})} /></Field>
-              <Field label="الرابط (http/https أو tel:)"><input className="w-full border rounded-xl p-2" value={draft.url} onChange={e=>setDraft({...draft, url:e.target.value})} /></Field>
-              <Field label="التصنيف"><input className="w-full border rounded-xl p-2" placeholder="مثال: الوزارات، الاتصالات…" value={draft.category} onChange={e=>setDraft({...draft, category:e.target.value})} /></Field>
-              <Field label="أيقونة Font Awesome"><input className="w-full border rounded-xl p-2" placeholder="fas fa-landmark" value={draft.icon} onChange={e=>setDraft({...draft, icon:e.target.value})} /></Field>
-              <Field label="لون الأيقونة"><input className="w-full border rounded-xl p-2" type="color" value={draft.color} onChange={e=>setDraft({...draft, color:e.target.value})} /></Field>
-              <Field label="وصف مختصر"><textarea className="w-full border rounded-xl p-2" rows={3} value={draft.description} onChange={e=>setDraft({...draft, description:e.target.value})} /></Field>
-              <Field label="وسوم (مفصولة بفواصل)"><input className="w-full border rounded-xl p-2" value={(draft.tags||[]).join(", ")} onChange={e=>setDraft({...draft, tags: e.target.value.split(",").map(t=>t.trim()).filter(Boolean)})} /></Field>
-              <Field label="رقم هاتف اختياري"><input className="w-full border rounded-xl p-2" value={draft.phone||""} onChange={e=>setDraft({...draft, phone:e.target.value})} /></Field>
-              <div className="flex items-center gap-2"><input id="active" type="checkbox" checked={draft.active!==false} onChange={e=>setDraft({...draft, active:e.target.checked})} /><label htmlFor="active">مفعلة</label></div>
-            </div>
-
-            <div className="bg-white rounded-2xl shadow p-4 space-y-3 mt-4">
-              <h2 className="font-semibold">إعدادات GitHub</h2>
-              <Field label="المالك (owner)"><input className="w-full border rounded-xl p-2" value={settings.owner} onChange={e=>setSettings({...settings, owner:e.target.value})} /></Field>
-              <Field label="المستودع (repo)"><input className="w-full border rounded-xl p-2" value={settings.repo} onChange={e=>setSettings({...settings, repo:e.target.value})} /></Field>
-              <Field label="الفرع (branch)"><input className="w-full border rounded-xl p-2" value={settings.branch} onChange={e=>setSettings({...settings, branch:e.target.value})} /></Field>
-              <Field label="مسار الملف (path)"><input className="w-full border rounded-xl p-2" value={settings.path} onChange={e=>setSettings({...settings, path:e.target.value})} /></Field>
-              <Field label="GitHub Token"><input className="w-full border rounded-xl p-2" placeholder="ghp_…" value={githubToken} onChange={e=>setGithubToken(e.target.value)} /></Field>
-              <div className="flex gap-2">
-                <button className="px-3 py-2 rounded-2xl shadow bg-white hover:bg-gray-100" onClick={loadFromGitHub} disabled={loading}>{loading?"...":"تحميل من GitHub"}</button>
-                <button className="px-3 py-2 rounded-2xl shadow bg-white hover:bg-gray-100" onClick={()=>saveToGitHub("Update services.json via admin")} disabled={loading}>حفظ إلى GitHub</button>
-              </div>
-              <p className="text-xs text-gray-500">يتطلب صلاحية public_repo على الأقل. سيُحفظ الملف بصيغة JSON.</p>
-            </div>
-          </div>
-
-          {/* List + Filters */}
-          <div className="md:col-span-2">
-            <div className="bg-white rounded-2xl shadow p-4 mb-4">
-              <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
-                <div className="flex gap-2 items-center">
-                  <input placeholder="ابحث…" className="border rounded-xl p-2 w-72" value={query} onChange={e=>setQuery(e.target.value)} />
-                  <select className="border rounded-xl p-2" value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}>
-                    <option value="all">كل التصنيفات</option>
-                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <span className="text-sm text-gray-500">{filtered.length} / {services.length} خدمة</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {filtered.map(s => (
-                <div key={s.id} className={`rounded-2xl shadow p-4 border ${s.active!==false?"bg-white":"bg-gray-100 opacity-80"}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <i className={s.icon} style={{ color: s.color, fontSize: 24 }} aria-hidden />
-                      <div>
-                        <a href={s.url} target="_blank" rel="noreferrer" className="font-semibold hover:underline">{s.title}</a>
-                        <div className="text-xs text-gray-500">{s.category}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button className="text-sm px-2 py-1 rounded-xl bg-gray-50 hover:bg-gray-100" onClick={()=>up(s.id)}>↑</button>
-                      <button className="text-sm px-2 py-1 rounded-xl bg-gray-50 hover:bg-gray-100" onClick={()=>down(s.id)}>↓</button>
-                      <button className="text-sm px-2 py-1 rounded-xl bg-gray-50 hover:bg-gray-100" onClick={()=>startEdit(s.id)}>تعديل</button>
-                      <button className="text-sm px-2 py-1 rounded-xl bg-red-50 hover:bg-red-100" onClick={()=>remove(s.id)}>حذف</button>
-                    </div>
-                  </div>
-                  {s.description ? <p className="text-sm text-gray-600 mt-2">{s.description}</p> : null}
-                  {(s.tags && s.tags.length) ? (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {s.tags.map((t,i)=>(<span key={i} className="text-xs px-2 py-1 rounded-full bg-gray-100">#{t}</span>))}
-                    </div>
-                  ) : null}
-                  {s.phone ? <div className="text-xs mt-2"><a href={`tel:${s.phone}`} className="underline">{s.phone}</a></div> : null}
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Preview as Cards */}
-        <section className="bg-white rounded-2xl shadow p-4">
-          <h2 className="font-semibold mb-3">معاينة شبكة البوابة</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {services.map(s => (
-              <a key={s.id} href={s.url} target="_blank" rel="noreferrer" className={`block p-4 rounded-2xl border hover:shadow ${s.active!==false?"bg-white":"bg-gray-50 opacity-75"}`}>
-                <div className="flex items-center gap-3">
-                  <i className={s.icon} style={{ color: s.color, fontSize: 22 }} aria-hidden />
-                  <div>
-                    <div className="font-semibold">{s.title}</div>
-                    <div className="text-xs text-gray-500">{s.category}</div>
-                  </div>
-                </div>
-              </a>
-            ))}
-          </div>
-        </section>
-
-        {toast && (
-          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-4 py-2 rounded-full shadow">
-            {toast}
-          </div>
-        )}
-
-        {loading && (
-          <div className="fixed inset-0 bg-black/5 grid place-items-center">
-            <div className="bg-white px-4 py-2 rounded-xl shadow">جارٍ التنفيذ…</div>
-          </div>
-        )}
-      </div>
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>لوحة تحكم البوابة الجزائرية للخدمات الرقمية</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet"/>
+    <style>
+        :root {
+            --primary-color: #006233;
+            --secondary-color: #a52a2a;
+            --light-color: #f0faf6;
+            --text-color: #333;
+            --shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: Arial, Tahoma, sans-serif;
+        }
+        
+        body {
+            background-color: #f7fdf9;
+            color: var(--text-color);
+            direction: rtl;
+        }
+        
+        .header {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--shadow);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .header h1 {
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 15px;
+        }
+        
+        .btn {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background-color: var(--secondary-color);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: #8b0000;
+        }
+        
+        .btn-secondary {
+            background-color: var(--light-color);
+            color: var(--primary-color);
+            border: 1px solid var(--primary-color);
+        }
+        
+        .btn-secondary:hover {
+            background-color: #d4e8e0;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 15px;
+        }
+        
+        .dashboard {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 20px;
+        }
+        
+        .sidebar {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            padding: 20px;
+            height: fit-content;
+        }
+        
+        .sidebar-title {
+            color: var(--primary-color);
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--light-color);
+            font-size: 1.2rem;
+        }
+        
+        .nav-list {
+            list-style: none;
+        }
+        
+        .nav-item {
+            margin-bottom: 10px;
+        }
+        
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            color: var(--text-color);
+            text-decoration: none;
+            border-radius: 5px;
+            transition: all 0.3s;
+        }
+        
+        .nav-link:hover, .nav-link.active {
+            background-color: var(--light-color);
+            color: var(--primary-color);
+        }
+        
+        .main-content {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            padding: 20px;
+        }
+        
+        .section-title {
+            color: var(--primary-color);
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--light-color);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .stats-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        
+        .stat-card {
+            background-color: var(--light-color);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: var(--shadow);
+        }
+        
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--primary-color);
+            margin: 10px 0;
+        }
+        
+        .stat-label {
+            color: var(--secondary-color);
+            font-weight: bold;
+        }
+        
+        .services-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        .services-table th, 
+        .services-table td {
+            padding: 12px 15px;
+            text-align: right;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .services-table th {
+            background-color: var(--light-color);
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+        
+        .services-table tr:hover {
+            background-color: rgba(0, 98, 51, 0.05);
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn-sm {
+            padding: 5px 10px;
+            font-size: 0.85rem;
+        }
+        
+        .btn-edit {
+            background-color: #f0ad4e;
+            color: white;
+        }
+        
+        .btn-delete {
+            background-color: #d9534f;
+            color: white;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal-content {
+            background-color: white;
+            padding: 25px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: var(--shadow);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .modal-title {
+            color: var(--primary-color);
+            font-size: 1.3rem;
+        }
+        
+        .close-modal {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #999;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+        }
+        
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+        
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #4caf50;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 5px;
+            box-shadow: var(--shadow);
+            z-index: 1100;
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+            
+            .sidebar {
+                display: none;
+            }
+            
+            .stats-cards {
+                grid-template-columns: 1fr;
+            }
+            
+            .header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+            
+            .header-actions {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>
+            <i class="fas fa-cogs"></i>
+            لوحة تحكم البوابة الجزائرية للخدمات الرقمية
+        </h1>
+        <div class="header-actions">
+            <button class="btn btn-primary" id="addServiceBtn">
+                <i class="fas fa-plus"></i> إضافة خدمة جديدة
+            </button>
+            <button class="btn btn-secondary" onclick="window.location.href='index.html'">
+                <i class="fas fa-home"></i> العودة للبوابة
+            </button>
+        </div>
     </div>
-  );
-}
+    
+    <div class="container">
+        <div class="dashboard">
+            <div class="sidebar">
+                <h3 class="sidebar-title">القائمة</h3>
+                <ul class="nav-list">
+                    <li class="nav-item">
+                        <a href="#" class="nav-link active">
+                            <i class="fas fa-tachometer-alt"></i> لوحة التحكم
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#" class="nav-link">
+                            <i class="fas fa-list"></i> إدارة الخدمات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#" class="nav-link">
+                            <i class="fas fa-chart-bar"></i> الإحصائيات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#" class="nav-link">
+                            <i class="fas fa-cog"></i> الإعدادات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#" class="nav-link">
+                            <i class="fas fa-users"></i> المستخدمون
+                        </a>
+                    </li>
+                </ul>
+            </div>
+            
+            <div class="main-content">
+                <h2 class="section-title">
+                    <i class="fas fa-tachometer-alt"></i> نظرة عامة
+                </h2>
+                
+                <div class="stats-cards">
+                    <div class="stat-card">
+                        <i class="fas fa-list fa-2x" style="color: var(--primary-color);"></i>
+                        <div class="stat-number">142</div>
+                        <div class="stat-label">الخدمات المضافة</div>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fas fa-users fa-2x" style="color: var(--primary-color);"></i>
+                        <div class="stat-number">3,256,894</div>
+                        <div class="stat-label">عدد الزيارات</div>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fas fa-eye fa-2x" style="color: var(--primary-color);"></i>
+                        <div class="stat-number">21</div>
+                        <div class="stat-label">الأقسام الرئيسية</div>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fas fa-star fa-2x" style="color: var(--primary-color);"></i>
+                        <div class="stat-number">4.8</div>
+                        <div class="stat-label">التقييم العام</div>
+                    </div>
+                </div>
+                
+                <h2 class="section-title">
+                    <i class="fas fa-list"></i> أحدث الخدمات المضافة
+                </h2>
+                
+                <table class="services-table">
+                    <thead>
+                        <tr>
+                            <th>اسم الخدمة</th>
+                            <th>القسم</th>
+                            <th>تاريخ الإضافة</th>
+                            <th>الإجراءات</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>دفع فواتير الكهرباء والغاز</td>
+                            <td>خدمات الدفع الإلكتروني</td>
+                            <td>2023-10-15</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn btn-sm btn-edit">
+                                        <i class="fas fa-edit"></i> تعديل
+                                    </button>
+                                    <button class="btn btn-sm btn-delete">
+                                        <i class="fas fa-trash"></i> حذف
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>استخراج شهادة الميلاد</td>
+                            <td>الإدارة المحلية</td>
+                            <td>2023-10-14</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn btn-sm btn-edit">
+                                        <i class="fas fa-edit"></i> تعديل
+                                    </button>
+                                    <button class="btn btn-sm btn-delete">
+                                        <i class="fas fa-trash"></i> حذف
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>تعبئة رصيد الهاتف - موبيليس</td>
+                            <td>تعبئة الهاتف النقال</td>
+                            <td>2023-10-13</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn btn-sm btn-edit">
+                                        <i class="fas fa-edit"></i> تعديل
+                                    </button>
+                                    <button class="btn btn-sm btn-delete">
+                                        <i class="fas fa-trash"></i> حذف
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>الاطلاع على رصيد الحساب الجاري</td>
+                            <td>بريد الجزائر</td>
+                            <td>2023-10-12</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn btn-sm btn-edit">
+                                        <i class="fas fa-edit"></i> تعديل
+                                    </button>
+                                    <button class="btn btn-sm btn-delete">
+                                        <i class="fas fa-trash"></i> حذف
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>فضاء أولياء التلاميذ</td>
+                            <td>التربية والتعليم</td>
+                            <td>2023-10-11</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn btn-sm btn-edit">
+                                        <i class="fas fa-edit"></i> تعديل
+                                    </button>
+                                    <button class="btn btn-sm btn-delete">
+                                        <i class="fas fa-trash"></i> حذف
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- نافذة إضافة خدمة جديدة -->
+    <div class="modal" id="addServiceModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fas fa-plus-circle"></i> إضافة خدمة جديدة
+                </h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            
+            <form id="serviceForm">
+                <div class="form-group">
+                    <label for="serviceName" class="form-label">اسم الخدمة</label>
+                    <input type="text" id="serviceName" class="form-control" required placeholder="أدخل اسم الخدمة">
+                </div>
+                
+                <div class="form-group">
+                    <label for="serviceUrl" class="form-label">رابط الخدمة</label>
+                    <input type="url" id="serviceUrl" class="form-control" required placeholder="أدخل رابط الخدمة">
+                </div>
+                
+                <div class="form-group">
+                    <label for="serviceCategory" class="form-label">القسم</label>
+                    <select id="serviceCategory" class="form-control" required>
+                        <option value="">اختر القسم</option>
+                        <option value="payment-links">خدمات الدفع الإلكتروني</option>
+                        <option value="recharge-links">تعبئة الهاتف النقال</option>
+                        <option value="post-links">بريد الجزائر</option>
+                        <option value="admin-links">الإدارة المحلية</option>
+                        <option value="education-section">التربية والتعليم</option>
+                        <option value="auto-entrepreneur">الخدمات الجامعية</option>
+                        <option value="vocational-section">التكوين المهني</option>
+                        <option value="real-estate-section">خدمات عقارية</option>
+                        <option value="social-security">الضمان الاجتماعي</option>
+                        <option value="justice-links">الخدمات القضائية</option>
+                        <option value="transport-section">النقل وحجز التذاكر</option>
+                        <option value="anem-links">الوكالة الوطنية للتشغيل</option>
+                        <option value="emergency-numbers">فضاءات ووكالات</option>
+                        <option value="insurance-links">خدمات التأمين</option>
+                        <option value="health-links">الخدمات الصحية</option>
+                        <option value="emergency-numbers">أرقام الطوارئ</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="serviceIcon" class="form-label">أيقونة الخدمة</label>
+                    <select id="serviceIcon" class="form-control">
+                        <option value="fas fa-file-invoice-dollar">فاتورة (fa-file-invoice-dollar)</option>
+                        <option value="fas fa-money-check-alt">دفع (fa-money-check-alt)</option>
+                        <option value="fas fa-mobile-alt">هاتف (fa-mobile-alt)</option>
+                        <option value="fas fa-envelope">بريد (fa-envelope)</option>
+                        <option value="fas fa-id-card">هوية (fa-id-card)</option>
+                        <option value="fas fa-passport">جواز سفر (fa-passport)</option>
+                        <option value="fas fa-graduation-cap">تعليم (fa-graduation-cap)</option>
+                        <option value="fas fa-user-graduate">جامعة (fa-user-graduate)</option>
+                        <option value="fas fa-user-gear">مهني (fa-user-gear)</option>
+                        <option value="fas fa-map-marked-alt">عقار (fa-map-marked-alt)</option>
+                        <option value="fas fa-shield-alt">تأمين (fa-shield-alt)</option>
+                        <option value="fas fa-notes-medical">صحة (fa-notes-medical)</option>
+                        <option value="fas fa-balance-scale">عدالة (fa-balance-scale)</option>
+                        <option value="fas fa-bus">نقل (fa-bus)</option>
+                        <option value="fas fa-briefcase">تشغيل (fa-briefcase)</option>
+                        <option value="fas fa-building">وكالات (fa-building)</option>
+                        <option value="fas fa-phone-volume">طوارئ (fa-phone-volume)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="serviceDescription" class="form-label">وصف الخدمة (اختياري)</label>
+                    <textarea id="serviceDescription" class="form-control" rows="3" placeholder="أدخل وصفاً مختصراً للخدمة"></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelAddService">إلغاء</button>
+                    <button type="submit" class="btn btn-primary">حفظ الخدمة</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div class="notification" id="notification">
+        <i class="fas fa-check-circle"></i> تم إضافة الخدمة بنجاح!
+    </div>
 
-function Field({ label, children }) {
-  return (
-    <label className="block space-y-1">
-      <span className="text-sm text-gray-700">{label}</span>
-      {children}
-    </label>
-  );
-}
-                                       
+    <script>
+        // عناصر DOM
+        const addServiceBtn = document.getElementById('addServiceBtn');
+        const addServiceModal = document.getElementById('addServiceModal');
+        const closeModalBtn = document.querySelector('.close-modal');
+        const cancelAddServiceBtn = document.getElementById('cancelAddService');
+        const serviceForm = document.getElementById('serviceForm');
+        const notification = document.getElementById('notification');
+        
+        // فتح نافذة إضافة خدمة
+        addServiceBtn.addEventListener('click', () => {
+            addServiceModal.style.display = 'flex';
+        });
+        
+        // إغلاق نافذة إضافة خدمة
+        closeModalBtn.addEventListener('click', closeModal);
+        cancelAddServiceBtn.addEventListener('click', closeModal);
+        
+        // إغلاق النافذة عند النقر خارجها
+        window.addEventListener('click', (e) => {
+            if (e.target === addServiceModal) {
+                closeModal();
+            }
+        });
+        
+        function closeModal() {
+            addServiceModal.style.display = 'none';
+            serviceForm.reset();
+        }
+        
+        // معالجة إرسال النموذج
+        serviceForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            
+            // هنا سيتم إضافة الكود لحفظ الخدمة في قاعدة البيانات أو localStorage
+            // في هذا المثال، سنكتفي بعرض إشعار نجاح
+            
+            // إغلاق النافذة
+            closeModal();
+            
+            // عرض إشعار النجاح
+            showNotification('تم إضافة الخدمة بنجاح!');
+        });
+        
+        // وظيفة عرض الإشعارات
+        function showNotification(message) {
+            notification.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
+            notification.style.display = 'block';
+            
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+        
+        // إضافة تأثيرات للجدول
+        const tableRows = document.querySelectorAll('.services-table tr');
+        tableRows.forEach(row => {
+            row.addEventListener('click', (e) => {
+                if (!e.target.closest('.action-buttons')) {
+                    row.style.backgroundColor = '#f5f5f5';
+                    setTimeout(() => {
+                        row.style.backgroundColor = '';
+                    }, 300);
+                }
+            });
+        });
+    </script>
+</body>
+</html>
